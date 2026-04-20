@@ -11,10 +11,10 @@ from datetime import datetime
 from pathlib import Path
 
 BAUD_RATE = 115200
-# Matches: LiDAR:12.3 | F:45.6 L:78.9 R:12.3
 PATTERN = re.compile(
     r"LiDAR:([\d.]+|OUT)\s*\|\s*F:([-\d.]+)\s+L:([-\d.]+)\s+R:([-\d.]+)"
 )
+BEHAVIORS = ["walking", "left_turn", "right_turn", "stop", "step_up", "step_down", "obstacle_avoid"]
 
 
 def find_port():
@@ -27,18 +27,35 @@ def find_port():
     return None
 
 
+def ask_label():
+    print("Select behavior label:")
+    for i, b in enumerate(BEHAVIORS):
+        print(f"  {i+1}. {b}")
+    print("  0. Custom (type your own)")
+    choice = input("Enter number or custom name: ").strip()
+    if choice.isdigit():
+        idx = int(choice)
+        if idx == 0:
+            return input("Custom label: ").strip().replace(" ", "_")
+        if 1 <= idx <= len(BEHAVIORS):
+            return BEHAVIORS[idx - 1]
+    return choice.replace(" ", "_") or "unlabeled"
+
+
 def main():
     port = sys.argv[1] if len(sys.argv) > 1 else find_port()
     if not port:
         print("No serial port found. Usage: python serial_to_csv.py [PORT]")
         sys.exit(1)
 
+    label = ask_label()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     save_dir = Path(__file__).parent / "data"
     save_dir.mkdir(exist_ok=True)
-    csv_path = save_dir / f"sensor_data_{timestamp}.csv"
+    csv_path = save_dir / f"{label}_{timestamp}.csv"
 
-    print(f"Connecting to {port} at {BAUD_RATE} baud...")
+    print(f"\nConnecting to {port} at {BAUD_RATE} baud...")
+    print(f"Label: {label}")
     print(f"Saving to {csv_path}")
     print("Press Ctrl+C to stop.\n")
 
@@ -46,7 +63,7 @@ def main():
          open(csv_path, "w", newline="") as f:
 
         writer = csv.writer(f)
-        writer.writerow(["timestamp_s", "lidar_cm", "front_cm", "left_cm", "right_cm"])
+        writer.writerow(["timestamp_s", "lidar_cm", "front_cm", "left_cm", "right_cm", "label"])
 
         start = time.time()
         while True:
@@ -70,6 +87,7 @@ def main():
                     float(f_val),
                     float(l_val),
                     float(r_val),
+                    label,
                 ]
                 writer.writerow(row)
                 f.flush()
