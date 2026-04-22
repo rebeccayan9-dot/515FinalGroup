@@ -11,8 +11,11 @@ from datetime import datetime
 from pathlib import Path
 
 BAUD_RATE = 115200
+DURATION_S = 180  # 3 minutes
 PATTERN = re.compile(
     r"LiDAR:([\d.]+|OUT)\s*\|\s*F:([-\d.]+)\s+L:([-\d.]+)\s+R:([-\d.]+)"
+    r"\s*\|\s*AX:([-\d.]+)\s+AY:([-\d.]+)\s+AZ:([-\d.]+)"
+    r"\s+GX:([-\d.]+)\s+GY:([-\d.]+)\s+GZ:([-\d.]+)"
 )
 BEHAVIORS = ["walking", "left_turn", "right_turn", "stop", "step_up", "step_down", "obstacle_avoid"]
 
@@ -57,16 +60,23 @@ def main():
     print(f"\nConnecting to {port} at {BAUD_RATE} baud...")
     print(f"Label: {label}")
     print(f"Saving to {csv_path}")
-    print("Press Ctrl+C to stop.\n")
+    print(f"Recording for {DURATION_S // 60} minutes. Press Ctrl+C to stop early.\n")
 
     with serial.Serial(port, BAUD_RATE, timeout=2) as ser, \
          open(csv_path, "w", newline="") as f:
 
         writer = csv.writer(f)
-        writer.writerow(["timestamp_s", "lidar_cm", "front_cm", "left_cm", "right_cm", "label"])
+        writer.writerow(["timestamp_s", "lidar_cm", "front_cm", "left_cm", "right_cm",
+                         "ax_g", "ay_g", "az_g", "gx_dps", "gy_dps", "gz_dps", "label"])
 
         start = time.time()
         while True:
+            elapsed = time.time() - start
+            if elapsed >= DURATION_S:
+                print(f"\n3 minutes reached. Stopping.")
+                break
+            remaining = DURATION_S - elapsed
+            print(f"\r  {int(remaining)}s remaining...", end="", flush=True)
             try:
                 line = ser.readline().decode("utf-8", errors="replace").strip()
             except serial.SerialException as e:
@@ -76,17 +86,17 @@ def main():
             if not line:
                 continue
 
-            print(line)
+            print(f"\r{line:<60}")
             m = PATTERN.search(line)
             if m:
-                lidar_raw, f_val, l_val, r_val = m.groups()
+                lidar_raw, f_val, l_val, r_val, ax, ay, az, gx, gy, gz = m.groups()
                 lidar_cm = lidar_raw if lidar_raw == "OUT" else float(lidar_raw)
                 row = [
                     round(time.time() - start, 3),
                     lidar_cm,
-                    float(f_val),
-                    float(l_val),
-                    float(r_val),
+                    float(f_val), float(l_val), float(r_val),
+                    float(ax), float(ay), float(az),
+                    float(gx), float(gy), float(gz),
                     label,
                 ]
                 writer.writerow(row)
