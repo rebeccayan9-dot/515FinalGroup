@@ -4,12 +4,13 @@
 #include <MPU6050.h>
 #include "classifier.h"
 
-#define TRIG_FRONT 2
-#define ECHO_FRONT 44
-#define TRIG_LEFT  8
-#define ECHO_LEFT  9
-#define TRIG_RIGHT 43
-#define ECHO_RIGHT 4
+#define TRIG_FRONT  2
+#define ECHO_FRONT  44
+#define TRIG_LEFT   8
+#define ECHO_LEFT   9
+#define TRIG_RIGHT  43
+#define ECHO_RIGHT  4
+#define HAPTIC_PIN  10
 
 VL53L1X lidar;
 MPU6050 mpu;
@@ -17,22 +18,50 @@ Eloquent::ML::Port::RandomForest clf;
 bool lidar_ok = false;
 bool mpu_ok   = false;
 
-// Feature order must match train_model.py
-// [lidar_cm, front_cm, left_cm, right_cm, ax_g, ay_g, az_g, gx_dps, gy_dps, gz_dps]
-#define N_RAW    10
-#define WINDOW   5
-#define N_FEATS  (N_RAW * 4)  // mean, std, min, max per raw feature
-
-float ring[WINDOW][N_RAW];
-int   ring_count = 0;
-int   ring_head  = 0;
+// Must match the label order produced by train_model.py (alphabetical)
+// 0:left_turn  1:obstacle_avoid  2:right_turn
+// 3:step_down  4:step_up         5:stop        6:walking
+#define N_RAW   10
+#define WINDOW  5
+#define N_FEATS (N_RAW * 4)
 
 const char* LABELS[] = {
   "left_turn", "obstacle_avoid", "right_turn",
   "step_down", "step_up", "stop", "walking"
 };
 
+float ring[WINDOW][N_RAW];
+int   ring_count = 0;
+int   ring_head  = 0;
+
 void waitForPickup();
+
+void buzz(int ms) {
+  digitalWrite(HAPTIC_PIN, HIGH); delay(ms);
+  digitalWrite(HAPTIC_PIN, LOW);
+}
+
+// Haptic patterns driven purely by classifier output.
+// No hardcoded thresholds — the model learned these from real data.
+void hapticAlert(int pred) {
+  switch (pred) {
+    case 3: // step_down — fall hazard, most urgent
+      buzz(80); delay(60); buzz(80); delay(60); buzz(80);
+      break;
+    case 1: // obstacle_avoid
+    case 4: // step_up
+      buzz(250);
+      break;
+    case 0: // left_turn
+      buzz(100);
+      break;
+    case 2: // right_turn
+      buzz(100); delay(80); buzz(100);
+      break;
+    default: // stop, walking — no alert
+      break;
+  }
+}
 
 float getFilteredDistance(int t, int e) {
   float d = 0; int count = 0;
@@ -44,11 +73,10 @@ float getFilteredDistance(int t, int e) {
     if (dur > 0) { d += (dur * 0.0343 / 2); count++; }
     delay(10);
   }
-  return (count > 0) ? (d / count) : 400.0; // fallback 400cm
+  return (count > 0) ? (d / count) : 400.0;
 }
 
 void computeFeatures(float* out) {
-  // For each of N_RAW features: mean, std, min, max
   for (int f = 0; f < N_RAW; f++) {
     float sum = 0, mn = ring[0][f], mx = ring[0][f];
     for (int i = 0; i < WINDOW; i++) {
@@ -95,6 +123,7 @@ void setup() {
   pinMode(TRIG_FRONT, OUTPUT); pinMode(ECHO_FRONT, INPUT);
   pinMode(TRIG_LEFT,  OUTPUT); pinMode(ECHO_LEFT,  INPUT);
   pinMode(TRIG_RIGHT, OUTPUT); pinMode(ECHO_RIGHT, INPUT);
+  pinMode(HAPTIC_PIN, OUTPUT); digitalWrite(HAPTIC_PIN, LOW);
 
   waitForPickup();
 }
@@ -102,7 +131,7 @@ void setup() {
 void waitForPickup() {
   if (!mpu_ok) return;
   Serial.println("--- Sleeping. Pick up to activate ---");
-  ring_count = 0; ring_head = 0; // reset window
+  ring_count = 0; ring_head = 0;
   int motion_count = 0;
   while (motion_count < 5) {
     int16_t ax16, ay16, az16, gx16, gy16, gz16;
@@ -149,13 +178,13 @@ void loop() {
   ring_head = (ring_head + 1) % WINDOW;
   if (ring_count < WINDOW) ring_count++;
 
-  // --- Inference (once window is full) ---
-  const char* label = "...";
+  // --- Inference + haptic ---
+  int pred = -1;
   if (ring_count == WINDOW) {
     float feats[N_FEATS];
     computeFeatures(feats);
-    int pred = clf.predict(feats);
-    label = LABELS[pred];
+    pred = clf.predict(feats);
+    hapticAlert(pred);
   }
 
   // --- Auto-sleep: 30s of stillness ---
@@ -172,6 +201,7 @@ void loop() {
   }
 
   // --- Output ---
+  const char* label = (pred >= 0) ? LABELS[pred] : "...";
   Serial.printf("LiDAR:%.1f | F:%.1f L:%.1f R:%.1f | AX:%.3f AY:%.3f AZ:%.3f GX:%.2f GY:%.2f GZ:%.2f | >> %s\n",
     lc, f, l, r, ax, ay, az, gx, gy, gz, label);
 
