@@ -2,21 +2,43 @@
 #include <Wire.h>
 #include <VL53L1X.h>
 #include <MPU6050.h>
+#include <Adafruit_DRV2605.h>
 #include "classifier.h"
 
-#define TRIG_FRONT  2
-#define ECHO_FRONT  44
-#define TRIG_LEFT   8
-#define ECHO_LEFT   9
+// PCB v1 pin assignments (single XIAO ESP32-S3, J1/J2 sockets)
+#define TRIG_FRONT  1
+#define ECHO_FRONT  2
+#define TRIG_LEFT   3
+#define ECHO_LEFT   4
 #define TRIG_RIGHT  43
-#define ECHO_RIGHT  4
-#define HAPTIC_PIN  10
+#define ECHO_RIGHT  9
+
+// PCA9548A I²C mux + 4× DRV2605L haptic drivers (all share addr 0x5A)
+#define PCA_ADDR  0x70
+#define CH_FRONT  0
+#define CH_LEFT   1
+#define CH_RIGHT  2
+#define CH_TOP    3
+
+// DRV2605 ROM effect IDs (library 1 = ERM)
+#define FX_STRONG_BUZZ   14
+#define FX_GENTLE_CLICK  17
+#define FX_STRONG_CLICK   1
+#define FX_LONG_BUZZ     47
+
+// Obstacle distance thresholds (cm) — tune these during field testing
+#define THRESH_LIDAR_CLOSE  60   // urgent strong buzz
+#define THRESH_LIDAR_MID   120   // early gentle warning
+#define THRESH_FRONT       100   // front ultrasonic (fallback when LiDAR failed)
+#define THRESH_SIDE         80   // left / right ultrasonic
 
 VL53L1X lidar;
 MPU6050 mpu;
+Adafruit_DRV2605 drv;
 Eloquent::ML::Port::RandomForest clf;
 bool lidar_ok = false;
 bool mpu_ok   = false;
+bool haptic_ok[4] = {false, false, false, false};
 
 // Must match the label order produced by train_model.py (alphabetical)
 // 0:left_turn  1:obstacle_avoid  2:right_turn
@@ -36,31 +58,56 @@ int   ring_head  = 0;
 
 void waitForPickup();
 
-void buzz(int ms) {
-  digitalWrite(HAPTIC_PIN, HIGH); delay(ms);
-  digitalWrite(HAPTIC_PIN, LOW);
+void tcaSelect(uint8_t ch) {
+  Wire.beginTransmission(PCA_ADDR);
+  Wire.write(1 << ch);
+  Wire.endTransmission();
 }
 
-// Haptic patterns driven purely by classifier output.
-// No hardcoded thresholds — the model learned these from real data.
-void hapticAlert(int pred) {
-  switch (pred) {
-    case 3: // step_down — fall hazard, most urgent
-      buzz(80); delay(60); buzz(80); delay(60); buzz(80);
-      break;
-    case 1: // obstacle_avoid
-    case 4: // step_up
-      buzz(250);
-      break;
-    case 0: // left_turn
-      buzz(100);
-      break;
-    case 2: // right_turn
-      buzz(100); delay(80); buzz(100);
-      break;
-    default: // stop, walking — no alert
-      break;
+void hapticPlay(uint8_t ch, uint8_t effect) {
+  if (!haptic_ok[ch]) return;
+  tcaSelect(ch);
+  drv.setWaveform(0, effect);
+  drv.setWaveform(1, 0);
+  drv.go();
+}
+
+void hapticInit() {
+  for (uint8_t ch = CH_FRONT; ch <= CH_TOP; ch++) {
+    tcaSelect(ch);
+    if (drv.begin()) {
+      drv.selectLibrary(1);
+      drv.setMode(DRV2605_MODE_INTTRIG);
+      haptic_ok[ch] = true;
+      Serial.printf("DRV2605 ch%u: OK\n", ch);
+    } else {
+      Serial.printf("DRV2605 ch%u: FAILED\n", ch);
+    }
   }
+}
+
+// 4 independent motors on a handle (up/down/left/right). Fire in parallel —
+// directional channels can buzz simultaneously when multiple obstacles exist.
+void hapticAlert(int pred, float lc, float f, float l, float r) {
+  // step_down: fall hazard — all 4 motors at once
+  if (pred == 3) {
+    hapticPlay(CH_FRONT, FX_STRONG_BUZZ);
+    hapticPlay(CH_LEFT,  FX_STRONG_BUZZ);
+    hapticPlay(CH_RIGHT, FX_STRONG_BUZZ);
+    hapticPlay(CH_TOP,   FX_STRONG_BUZZ);
+    return;
+  }
+  // Front: LiDAR close=urgent, LiDAR mid=early warning, ultrasonic fallback
+  if (lidar_ok) {
+    if      (lc < THRESH_LIDAR_CLOSE) hapticPlay(CH_FRONT, FX_STRONG_BUZZ);
+    else if (lc < THRESH_LIDAR_MID)   hapticPlay(CH_FRONT, FX_GENTLE_CLICK);
+  } else if (f < THRESH_FRONT) {
+    hapticPlay(CH_FRONT, FX_STRONG_BUZZ);
+  }
+  if (l < THRESH_SIDE) hapticPlay(CH_LEFT,  FX_STRONG_CLICK);
+  if (r < THRESH_SIDE) hapticPlay(CH_RIGHT, FX_STRONG_CLICK);
+  // step_up: gentle upward cue on TOP
+  if (pred == 4) hapticPlay(CH_TOP, FX_LONG_BUZZ);
 }
 
 float getFilteredDistance(int t, int e) {
@@ -123,7 +170,8 @@ void setup() {
   pinMode(TRIG_FRONT, OUTPUT); pinMode(ECHO_FRONT, INPUT);
   pinMode(TRIG_LEFT,  OUTPUT); pinMode(ECHO_LEFT,  INPUT);
   pinMode(TRIG_RIGHT, OUTPUT); pinMode(ECHO_RIGHT, INPUT);
-  pinMode(HAPTIC_PIN, OUTPUT); digitalWrite(HAPTIC_PIN, LOW);
+
+  hapticInit();
 
   waitForPickup();
 }
@@ -148,8 +196,14 @@ void loop() {
   // --- Read sensors ---
   float lc = 400.0;
   if (lidar_ok) {
-    float d = lidar.read() / 10.0;
-    if (!lidar.timeoutOccurred() && d < 400) lc = d;
+    uint16_t raw_mm = lidar.read();
+    bool to = lidar.timeoutOccurred();
+    float d = raw_mm / 10.0;
+    if (!to && d < 400) lc = d;
+    Serial.printf("[LiDAR dbg] raw=%u mm  timeout=%d  rangeStatus=%u\n",
+                  raw_mm, to ? 1 : 0, lidar.ranging_data.range_status);
+  } else {
+    Serial.println("[LiDAR dbg] lidar_ok=false (init failed)");
   }
 
   float ax = 0, ay = 0, az = 0, gx = 0, gy = 0, gz = 0;
@@ -184,7 +238,7 @@ void loop() {
     float feats[N_FEATS];
     computeFeatures(feats);
     pred = clf.predict(feats);
-    hapticAlert(pred);
+    hapticAlert(pred, lc, f, l, r);
   }
 
   // --- Auto-sleep: 30s of stillness ---
@@ -201,9 +255,15 @@ void loop() {
   }
 
   // --- Output ---
-  const char* label = (pred >= 0) ? LABELS[pred] : "...";
+  const char* ml_label = (pred >= 0) ? LABELS[pred] : "...";
+  const char* alert = "clear";
+  if      (pred == 3)                            alert = "STEP_DOWN";
+  else if (lidar_ok ? (lc < THRESH_LIDAR_CLOSE) : (f < THRESH_FRONT)) alert = "OBS_FRONT";
+  else if (pred == 4)                            alert = "STEP_UP";
+  else if (l < THRESH_SIDE)                      alert = "OBS_LEFT";
+  else if (r < THRESH_SIDE)                      alert = "OBS_RIGHT";
   Serial.printf("LiDAR:%.1f | F:%.1f L:%.1f R:%.1f | AX:%.3f AY:%.3f AZ:%.3f GX:%.2f GY:%.2f GZ:%.2f | >> %s\n",
-    lc, f, l, r, ax, ay, az, gx, gy, gz, label);
+    lc, f, l, r, ax, ay, az, gx, gy, gz, alert);
 
   delay(50);
 }

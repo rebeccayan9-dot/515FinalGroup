@@ -252,13 +252,12 @@ main {
   transition:background .25s,color .25s,border-color .25s;
   border:2px solid var(--bdr); background:#1e2540; letter-spacing:.4px;
 }
-#pred-box.left_turn    { background:#162043; border-color:#3b82f6; color:#93c5fd; }
-#pred-box.right_turn   { background:#1e1043; border-color:#8b5cf6; color:#c4b5fd; }
-#pred-box.walking      { background:#0d2e18; border-color:#22c55e; color:#86efac; }
-#pred-box.stop         { background:#2d1e00; border-color:#f59e0b; color:#fde68a; }
-#pred-box.step_up      { background:#2d1400; border-color:#f97316; color:#fdba74; }
-#pred-box.step_down    { background:#2d0a0a; border-color:#ef4444; color:#fca5a5; }
-#pred-box.obstacle_avoid { background:#2d0720; border-color:#ec4899; color:#f9a8d4; }
+#pred-box.STEP_DOWN    { background:#2d0a0a; border-color:#ef4444; color:#fca5a5; }
+#pred-box.OBS_FRONT    { background:#2d1400; border-color:#f97316; color:#fdba74; }
+#pred-box.STEP_UP      { background:#162043; border-color:#3b82f6; color:#93c5fd; }
+#pred-box.OBS_LEFT     { background:#1e1043; border-color:#8b5cf6; color:#c4b5fd; }
+#pred-box.OBS_RIGHT    { background:#2d1e00; border-color:#f59e0b; color:#fde68a; }
+#pred-box.clear        { background:#0d2e18; border-color:#22c55e; color:#86efac; }
 
 /* ── session bars ── */
 .sb-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
@@ -425,16 +424,14 @@ footer label { font-size:10px; color:var(--muted); }
 // ── constants ────────────────────────────────────────────────────────────────
 const MAX_PTS  = 60;
 const WIN_SIZE = 5;
-const ALL_LBLS = ['left_turn','obstacle_avoid','right_turn',
-                  'step_down','step_up','stop','walking'];
+const ALL_LBLS = ['STEP_DOWN','OBS_FRONT','STEP_UP','OBS_LEFT','OBS_RIGHT','clear'];
 const LBL_CLR  = {
-  left_turn:     '#3b82f6',
-  right_turn:    '#8b5cf6',
-  walking:       '#22c55e',
-  stop:          '#f59e0b',
-  step_up:       '#f97316',
-  step_down:     '#ef4444',
-  obstacle_avoid:'#ec4899',
+  STEP_DOWN: '#ef4444',
+  OBS_FRONT: '#f97316',
+  STEP_UP:   '#3b82f6',
+  OBS_LEFT:  '#8b5cf6',
+  OBS_RIGHT: '#f59e0b',
+  clear:     '#22c55e',
 };
 
 // ── state ────────────────────────────────────────────────────────────────────
@@ -633,8 +630,9 @@ function connectSSE() {
     if (winBuf.length > WIN_SIZE) winBuf.shift();
     updateWinAnalysis();
 
-    // prediction
+    // prediction (show all alert states including 'clear')
     if (p.pred && p.pred !== '...') onPrediction(p.pred);
+    else if (!p.pred || p.pred === 'clear') onPrediction('clear');
   });
 
   evtSrc.addEventListener('status', e => {
