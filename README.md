@@ -1,6 +1,34 @@
-# SafeStep — ESP32-S3 Firmware
+# SafeStep — ESP32-S3 Assistive Cane
 
 TECHIN 515 Final Group Project
+
+SafeStep is a wearable/cane-mounted obstacle- and terrain-awareness device. It
+fuses LiDAR, three ultrasonic rangefinders, and an IMU on a Seeed XIAO ESP32-S3,
+classifies the user's motion in real time with an on-device Random Forest, and
+delivers directional haptic alerts through four vibration motors.
+
+```
+sensors ──► DSP (sliding window, mean/std/min/max) ──► Random Forest ──► haptic alert
+LiDAR + 3× ultrasonic + IMU            40 features            7 classes      4 motors
+```
+
+---
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| `src/main.cpp` | Firmware: sensor fusion, DSP, on-device inference, haptics |
+| `src/classifier.h` | Auto-generated C++ Random Forest (from `train_model.py`) |
+| `platformio.ini` | PlatformIO build config + library dependencies |
+| `serial_to_csv.py` | **Stream sensor data** → labeled CSV (CLI) |
+| `dashboard.py` | **Stream sensor data** → live web dashboard + recording |
+| `train_model.py` | Train the Random Forest, export `model.pkl` + `classifier.h` |
+| `e2e_eval.py` | End-to-end pipeline + cross-condition evaluation, writes `results/` |
+| `data/` | Labeled recordings (one CSV per session) |
+| `hardware/` | **Design files** — pinout, BOM, schematic/PCB exports |
+| `results/` | Evaluation report, confusion matrices, accuracy charts |
+| `model.pkl` | Trained model bundle (used by dashboard + eval) |
 
 ---
 
@@ -9,24 +37,14 @@ TECHIN 515 Final Group Project
 | Component | Part | Interface |
 |---|---|---|
 | MCU | Seeed XIAO ESP32-S3 | — |
-| Ultrasonic (×3) | HC-SR04 (front, left, right) | GPIO (TRIG/ECHO) |
-| LiDAR | VL53L1X | I2C |
-| IMU | MPU-6050 | I2C |
-| Haptic motor | ERM/LRA | GPIO PWM |
-| Mic | INMP441 | I2S |
+| LiDAR | VL53L1X | I²C |
+| IMU | MPU-6050 | I²C |
+| Ultrasonic ×3 | HC-SR04 (front / left / right) | GPIO TRIG/ECHO |
+| I²C mux | PCA9548A | I²C (addr `0x70`) |
+| Haptic driver ×4 | DRV2605L + ERM motor (front/left/right/top) | I²C via mux (addr `0x5A`) |
 
-### Wiring
-
-| Signal | ESP32-S3 GPIO |
-|---|---|
-| TRIG_FRONT | 2 |
-| ECHO_FRONT | 44 |
-| TRIG_LEFT | 8 |
-| ECHO_LEFT | 9 |
-| TRIG_RIGHT | 43 |
-| ECHO_RIGHT | 4 |
-| VL53L1X SDA | 5 (default I2C) |
-| VL53L1X SCL | 6 (default I2C) |
+Full pin assignments, I²C address map, and bill of materials are in
+[`hardware/HARDWARE.md`](hardware/HARDWARE.md).
 
 ---
 
@@ -34,150 +52,90 @@ TECHIN 515 Final Group Project
 
 ### Firmware
 - [PlatformIO](https://platformio.org/install) (VS Code extension or CLI)
-- Board: **Seeed XIAO ESP32-S3**
-- Library dependency (auto-installed by PlatformIO): `pololu/VL53L1X @ ^1.3.1`
+- Board: **Seeed XIAO ESP32-S3** (`board = seeed_xiao_esp32s3`)
+- Libraries (auto-installed by PlatformIO — see `platformio.ini`):
+  `pololu/VL53L1X`, `electroniccats/MPU6050`, `adafruit/Adafruit DRV2605 Library`
 
-### Python (data collection & training)
+### Python (data collection, training, evaluation)
 ```bash
-pip install pyserial scikit-learn pandas joblib
+pip install pyserial scikit-learn pandas numpy joblib matplotlib flask micromlgen
 ```
+> Use Python 3.13 (the model/eval scripts are validated there).
 
 ---
 
-## How to Run
+## How to run
 
 ### 1. Flash the firmware
-
 ```bash
-# Clone the repo
 git clone https://github.com/rebeccayan9-dot/515FinalGroup.git
 cd 515FinalGroup
-
-# Build and upload with PlatformIO CLI
-pio run --target upload
-
-# Or open the folder in VS Code with PlatformIO extension and click Upload
+pio run --target upload          # or use the PlatformIO "Upload" button in VS Code
 ```
+On boot the device sleeps until picked up (IMU motion), then streams sensor data
+over USB serial at **115200 baud** and fires haptics on detected hazards.
 
-The device will begin streaming sensor data over USB serial at **115200 baud** immediately after flashing.
+### 2. Stream sensor data
 
-### 2. Stream and record sensor data
+Two interchangeable tools read the same serial stream:
 
-Connect the ESP32-S3 via USB, then run:
-
+**A. CLI → CSV** (for data collection):
 ```bash
-python serial_to_csv.py
+python serial_to_csv.py                       # auto-detect port
+python serial_to_csv.py /dev/tty.usbmodem101  # macOS/Linux, explicit port
+python serial_to_csv.py COM3                   # Windows
 ```
+Prompts for a behavior label, records for 3 minutes (Ctrl+C to stop early), and
+saves to `data/{label}_{timestamp}.csv`.
 
-The script will:
-1. Auto-detect the serial port
-2. Prompt you to select a behavior label (walking, left_turn, stop, etc.)
-3. Stream and display live readings
-4. Save data to `data/{label}_{timestamp}.csv`
-
-Press **Ctrl+C** to stop recording.
-
-To specify a port manually:
+**B. Live web dashboard** (real-time charts + one-click recording):
 ```bash
-python serial_to_csv.py /dev/tty.usbmodem101   # macOS/Linux
-python serial_to_csv.py COM3                    # Windows
+python dashboard.py        # then open http://localhost:8050
 ```
+Pick the serial port in the header, watch live distance/IMU plots and the current
+prediction, and record labeled sessions from the footer controls.
 
-**Example output:**
-```
-Select behavior label:
-  1. walking
-  2. left_turn
-  3. right_turn
-  4. stop
-  5. step_up
-  6. step_down
-  7. obstacle_avoid
-  0. Custom (type your own)
-Enter number or custom name: 1
-
-Connecting to /dev/tty.usbmodem101 at 115200 baud...
-Label: walking
-Saving to data/walking_20260416_233414.csv
-
-LiDAR:31.0 | F:38.1 L:16.3 R:92.2
-LiDAR:33.2 | F:44.6 L:16.3 R:92.2
-```
-
-### 3. Train the behavior classifier
-
-After collecting labeled data for at least 2 behavior classes:
-
+### 3. Train the classifier
 ```bash
 python train_model.py
 ```
+Prints accuracy + confusion matrix, saves `model.pkl`, and exports the on-device
+C++ classifier to `src/classifier.h`. Re-flash the firmware to deploy the new model.
 
-Outputs accuracy report, confusion matrix, and saves `model.pkl`.
+### 4. Evaluate the end-to-end pipeline
+```bash
+python e2e_eval.py
+```
+Runs the full pipeline twice (reproducibility check) and a leave-one-session-out
+cross-condition test, writing logs, confusion-matrix PNGs, and a consolidated
+report to `results/` (see [`results/E2E_RESULTS.md`](results/E2E_RESULTS.md)).
 
 ---
 
-## Data Format
+## Data format
 
-Each CSV in `data/` has the following columns:
+Each CSV in `data/` has these columns:
 
 | Column | Unit | Description |
 |---|---|---|
-| `timestamp_s` | seconds | Time since recording started |
-| `lidar_cm` | cm | VL53L1X LiDAR distance (400.0 = out of range) |
-| `front_cm` | cm | Front HC-SR04 ultrasonic distance |
-| `left_cm` | cm | Left HC-SR04 ultrasonic distance |
-| `right_cm` | cm | Right HC-SR04 ultrasonic distance |
-| `label` | — | Behavior label for this session |
+| `timestamp_s` | s | Time since recording started |
+| `lidar_cm` | cm | VL53L1X distance (`OUT`/400 = out of range) |
+| `front_cm` / `left_cm` / `right_cm` | cm | HC-SR04 distances (`-1` = no echo) |
+| `ax_g` / `ay_g` / `az_g` | g | Accelerometer |
+| `gx_dps` / `gy_dps` / `gz_dps` | °/s | Gyroscope |
+| `label` | — | Behavior label for the session |
+
+**Classes:** `walking` · `left_turn` · `right_turn` · `stop` · `step_up` ·
+`step_down` · `obstacle_avoid`
 
 ---
 
-## Milestone 1 — Sensor Fusion & Data Collection ✓
+## Milestone status
 
-- 3× HC-SR04 ultrasonic (front / left / right) + VL53L1X LiDAR running concurrently on ESP32-S3
-- Filtered distance readings (3-sample average per sensor) output over Serial at ~5 Hz
-- `serial_to_csv.py` — labeled data collection with behavior menu
-- `train_model.py` — sliding-window Random Forest classifier skeleton
+- **M1 — Sensor fusion & data collection** ✓ — concurrent LiDAR + 3× ultrasonic +
+  IMU at ~5 Hz; labeled-data tooling (`serial_to_csv.py`, `dashboard.py`).
+- **M2 — Behavior recognition (TinyML)** ✓ — sliding-window Random Forest trained
+  (`train_model.py`), exported to C++ (`classifier.h`), running on-device with
+  haptic mapping. End-to-end + cross-condition results in `results/`.
 
----
-
-## Milestone 2 — Behavior Recognition & Step Detection (TinyML)
-
-### Phase 1 · Behavior Classification
-
-**Goal:** classify the user's current motion state in real time.
-
-**Classes:** walking · left_turn · right_turn · stop · step_up · step_down · obstacle_avoid
-
-**Features (sliding window, 10 rows ≈ 2 s):** mean, std, min, max per sensor → 16 features total
-
-**Model:** Random Forest (100 trees) — `train_model.py`
-
-### Phase 2 · Step & Edge Detection
-
-**Goal:** binary classifier — distinguish "wall ahead" from "downward stair edge."
-
-**Key feature:**
-```
-delta = lidar_cm - front_cm
-```
-At a stair edge, LiDAR distance jumps sharply while ultrasonic still reads the edge → `delta` spikes.
-
-### Phase 3 · On-Device Deployment
-
-1. Upload labeled CSVs to [Edge Impulse](https://edgeimpulse.com)
-2. Generate ESP32-S3-optimized C++ inference library (supports ESP-NN)
-3. Drop library into `lib/`, call `run_inference()` every 100 ms in `loop()`
-4. Map predicted class → haptic alert level
-
----
-
-## TODOs
-
-- [ ] Collect labeled data for all 7 behavior classes (≥ 3 min each)
-- [ ] Tune window size and Random Forest hyperparameters
-- [ ] Implement `delta` feature and stair-edge binary classifier
-- [ ] Upload to Edge Impulse and generate ESP32-S3 C++ library
-- [ ] Integrate inference into `main.cpp` loop
-- [ ] BLE notifications on behavior change
-- [ ] I2S audio cues ("obstacle ahead", "step down")
-- [ ] IMU cane-down detection — suppress alerts when cane is lifted
+See [`PRESENTATION_READINESS.md`](PRESENTATION_READINESS.md) for a readiness summary.

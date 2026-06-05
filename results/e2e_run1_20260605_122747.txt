@@ -1,0 +1,31 @@
+SafeStep E2E pipeline — RUN 1
+timestamp     : 2026-06-05 12:27:47
+files parsed  : 95
+windows (samples through pipeline): 4183
+pipeline wall time: 3338.0 ms
+deployed-model accuracy (in-sample): 0.9661
+
+per-class report:
+                precision    recall  f1-score   support
+
+     left_turn      0.938     0.953     0.945       318
+obstacle_avoid      0.935     0.932     0.934       309
+    right_turn      0.935     0.945     0.940       291
+     step_down      0.981     0.979     0.980       889
+       step_up      0.998     0.972     0.985      1246
+          stop      0.989     0.992     0.990       358
+       walking      0.926     0.957     0.941       772
+
+      accuracy                          0.966      4183
+     macro avg      0.957     0.961     0.959      4183
+  weighted avg      0.967     0.966     0.966      4183
+
+confusion matrix (rows=true, cols=pred):
+                left_turn  obstacle_avoid  right_turn  step_down  step_up  stop  walking
+left_turn             303               1           3          0        1     1        9
+obstacle_avoid          1             288           3          0        0     1       16
+right_turn              1               0         275          0        0     1       14
+step_down               1               4           1        870        1     0       12
+step_up                 1              14           0         14     1211     0        6
+stop                    0               0           1          0        0   355        2
+walking                16               1          11          3        1     1      739

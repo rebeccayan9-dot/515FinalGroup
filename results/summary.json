@@ -1,0 +1,52 @@
+{
+  "consecutive_runs": [
+    {
+      "run": 1,
+      "n_windows": 4183,
+      "n_files": 95,
+      "accuracy": 0.966053,
+      "wall_ms": 3338.0,
+      "pred_fingerprint": -499322547905087355,
+      "file": "e2e_run1_20260605_122747.txt",
+      "png": "cm_deployed_model.png"
+    },
+    {
+      "run": 2,
+      "n_windows": 4183,
+      "n_files": 95,
+      "accuracy": 0.966053,
+      "wall_ms": 3395.5,
+      "pred_fingerprint": -499322547905087355,
+      "file": "e2e_run2_20260605_122751.txt",
+      "png": null
+    }
+  ],
+  "reproducible": true,
+  "cross_condition": [
+    {
+      "held_out": "A (2026-04-22)",
+      "train_windows": 3669,
+      "test_windows": 514,
+      "accuracy": 0.323,
+      "classes_in_test": 5,
+      "png": "cm_holdout_A.png"
+    },
+    {
+      "held_out": "B (2026-04-28/29)",
+      "train_windows": 1880,
+      "test_windows": 2303,
+      "accuracy": 0.7369,
+      "classes_in_test": 7,
+      "png": "cm_holdout_B.png"
+    },
+    {
+      "held_out": "C (2026-05-08)",
+      "train_windows": 2817,
+      "test_windows": 1366,
+      "accuracy": 0.7064,
+      "classes_in_test": 7,
+      "png": "cm_holdout_C.png"
+    }
+  ],
+  "cross_condition_mean": 0.5888
+}
