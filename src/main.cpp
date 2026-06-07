@@ -43,7 +43,9 @@ bool haptic_ok[4] = {false, false, false, false};
 // Must match the label order produced by train_model.py (alphabetical)
 // 0:left_turn  1:obstacle_avoid  2:right_turn
 // 3:step_down  4:step_up         5:stop        6:walking
-#define N_RAW   10
+// LiDAR-free model: 9 channels (front,left,right + 6 IMU), no lidar_cm.
+// Feature order must match train_model.py FEATURES exactly.
+#define N_RAW   9
 #define WINDOW  5
 #define N_FEATS (N_RAW * 4)
 
@@ -72,6 +74,17 @@ void hapticPlay(uint8_t ch, uint8_t effect) {
   drv.go();
 }
 
+// Stronger cue: two queued strong buzzes back-to-back — use for a weak motor
+// so it's felt as clearly as the others.
+void hapticPlayStrong(uint8_t ch) {
+  if (!haptic_ok[ch]) return;
+  tcaSelect(ch);
+  drv.setWaveform(0, FX_STRONG_BUZZ);
+  drv.setWaveform(1, FX_STRONG_BUZZ);
+  drv.setWaveform(2, 0);
+  drv.go();
+}
+
 void hapticInit() {
   for (uint8_t ch = CH_FRONT; ch <= CH_TOP; ch++) {
     tcaSelect(ch);
@@ -86,9 +99,74 @@ void hapticInit() {
   }
 }
 
-// 4 independent motors on a handle (up/down/left/right). Fire in parallel —
-// directional channels can buzz simultaneously when multiple obstacles exist.
+// Number of working motors on the handle. Set to match the physical build:
+//   2 = LEFT + RIGHT only  (only ch0/ch1 alive; TOP not installed) ← current
+//   3 = FRONT + LEFT + RIGHT  (TOP not installed)
+//   4 = all four motors
+// In the 2-motor build only ch0 and ch1 work, so they are used as the LEFT and
+// RIGHT handle motors (ch0 — formerly FRONT — was physically moved to RIGHT).
+// There is no dedicated front motor: a FRONT obstacle buzzes LEFT+RIGHT together.
+// Bump this back to 3/4 once the other motors are fixed.
+#define HAPTIC_MOTORS 2
+
+#if HAPTIC_MOTORS == 2
+// Two working channels remapped to handle sides: ch1 = LEFT, ch0 = RIGHT.
+#define CH_HRIGHT  CH_FRONT   // ch0, the ex-FRONT DRV2605 moved to the right side
+#define CH_HLEFT   CH_LEFT    // ch1
+#endif
+
+// Independent motors on a handle. Fire in parallel — directional channels can
+// buzz simultaneously when multiple obstacles exist.
 void hapticAlert(int pred, float lc, float f, float l, float r) {
+#if HAPTIC_MOTORS == 2
+  // ── LEFT + RIGHT only: no front motor, TOP absent ──
+  // step_down: fall hazard — both motors, double-buzz (distinct from a front
+  // obstacle's single buzz on both).
+  if (pred == 3) {
+    hapticPlayStrong(CH_HLEFT);
+    hapticPlayStrong(CH_HRIGHT);
+    return;
+  }
+  // Front obstacle → both motors together (no dedicated front motor).
+  // LiDAR close=urgent strong buzz, LiDAR mid=early gentle warning, ultrasonic fallback.
+  if (lidar_ok) {
+    if (lc < THRESH_LIDAR_CLOSE) {
+      hapticPlay(CH_HLEFT, FX_STRONG_BUZZ);  hapticPlay(CH_HRIGHT, FX_STRONG_BUZZ);
+    } else if (lc < THRESH_LIDAR_MID) {
+      hapticPlay(CH_HLEFT, FX_GENTLE_CLICK); hapticPlay(CH_HRIGHT, FX_GENTLE_CLICK);
+    }
+  } else if (f < THRESH_FRONT) {
+    hapticPlay(CH_HLEFT, FX_STRONG_BUZZ);    hapticPlay(CH_HRIGHT, FX_STRONG_BUZZ);
+  }
+  // Side obstacles → the matching side motor only.
+  if (l < THRESH_SIDE) hapticPlay(CH_HLEFT,  FX_STRONG_CLICK);
+  if (r < THRESH_SIDE) hapticPlay(CH_HRIGHT, FX_STRONG_CLICK);
+  // step_up (normally CH_TOP) → both motors, long buzz
+  if (pred == 4) { hapticPlay(CH_HLEFT, FX_LONG_BUZZ); hapticPlay(CH_HRIGHT, FX_LONG_BUZZ); }
+
+#elif HAPTIC_MOTORS == 3
+  // ── TOP unavailable: FRONT + LEFT + RIGHT all functional ──
+  // step_down: fall hazard — 3 working motors at once (was all 4)
+  if (pred == 3) {
+    hapticPlay(CH_FRONT, FX_STRONG_BUZZ);
+    hapticPlay(CH_LEFT,  FX_STRONG_BUZZ);
+    hapticPlay(CH_RIGHT, FX_STRONG_BUZZ);
+    return;
+  }
+  // Front: LiDAR close=urgent, LiDAR mid=early warning, ultrasonic fallback
+  if (lidar_ok) {
+    if      (lc < THRESH_LIDAR_CLOSE) hapticPlay(CH_FRONT, FX_STRONG_BUZZ);
+    else if (lc < THRESH_LIDAR_MID)   hapticPlay(CH_FRONT, FX_GENTLE_CLICK);
+  } else if (f < THRESH_FRONT) {
+    hapticPlay(CH_FRONT, FX_STRONG_BUZZ);
+  }
+  if (l < THRESH_SIDE) hapticPlay(CH_LEFT,  FX_STRONG_CLICK);
+  if (r < THRESH_SIDE) hapticPlayStrong(CH_RIGHT);   // RIGHT motor is weak — boost it
+  // step_up (normally CH_TOP) → FRONT long buzz
+  if (pred == 4) hapticPlay(CH_FRONT, FX_LONG_BUZZ);
+
+#else
+  // ── original 4-motor mapping ──
   // step_down: fall hazard — all 4 motors at once
   if (pred == 3) {
     hapticPlay(CH_FRONT, FX_STRONG_BUZZ);
@@ -108,6 +186,7 @@ void hapticAlert(int pred, float lc, float f, float l, float r) {
   if (r < THRESH_SIDE) hapticPlay(CH_RIGHT, FX_STRONG_CLICK);
   // step_up: gentle upward cue on TOP
   if (pred == 4) hapticPlay(CH_TOP, FX_LONG_BUZZ);
+#endif
 }
 
 float getFilteredDistance(int t, int e) {
@@ -218,17 +297,16 @@ void loop() {
   float l = getFilteredDistance(TRIG_LEFT,  ECHO_LEFT);  delay(20);
   float r = getFilteredDistance(TRIG_RIGHT, ECHO_RIGHT);
 
-  // --- Update ring buffer ---
-  ring[ring_head][0] = lc;
-  ring[ring_head][1] = f;
-  ring[ring_head][2] = l;
-  ring[ring_head][3] = r;
-  ring[ring_head][4] = ax;
-  ring[ring_head][5] = ay;
-  ring[ring_head][6] = az;
-  ring[ring_head][7] = gx;
-  ring[ring_head][8] = gy;
-  ring[ring_head][9] = gz;
+  // --- Update ring buffer (LiDAR-free: front,left,right + 6 IMU) ---
+  ring[ring_head][0] = f;
+  ring[ring_head][1] = l;
+  ring[ring_head][2] = r;
+  ring[ring_head][3] = ax;
+  ring[ring_head][4] = ay;
+  ring[ring_head][5] = az;
+  ring[ring_head][6] = gx;
+  ring[ring_head][7] = gy;
+  ring[ring_head][8] = gz;
   ring_head = (ring_head + 1) % WINDOW;
   if (ring_count < WINDOW) ring_count++;
 

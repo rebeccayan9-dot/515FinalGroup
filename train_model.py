@@ -17,8 +17,9 @@ CPP_PATH   = Path(__file__).parent / "src" / "classifier.h"
 WINDOW = 5   # samples per window (~1.5s at 3Hz)
 STEP   = 2   # sliding step
 
+# LiDAR-free model: lidar_cm dropped (unreliable hardware). Ultrasonic + IMU only.
+# Order must match the firmware ring buffer in src/main.cpp.
 FEATURES = [
-    "lidar_cm",
     "front_cm", "left_cm", "right_cm",
     "ax_g", "ay_g", "az_g",
     "gx_dps", "gy_dps", "gz_dps",
