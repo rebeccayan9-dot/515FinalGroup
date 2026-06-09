@@ -2,15 +2,21 @@
 
 TECHIN 515 Final Group Project
 
-SafeStep is a wearable/cane-mounted obstacle- and terrain-awareness device. It
-fuses LiDAR, three ultrasonic rangefinders, and an IMU on a Seeed XIAO ESP32-S3,
-classifies the user's motion in real time with an on-device Random Forest, and
-delivers directional haptic alerts through four vibration motors.
+SafeStep is a wearable/cane-mounted obstacle- and terrain-awareness device on a
+Seeed XIAO ESP32-S3. It classifies the user's motion in real time with an
+on-device Random Forest — fed by **three ultrasonic rangefinders + an IMU** — and
+delivers directional haptic alerts through vibration motors. A forward VL53L1X
+LiDAR and the ultrasonic sensors also drive proximity warnings.
 
 ```
 sensors ──► DSP (sliding window, mean/std/min/max) ──► Random Forest ──► haptic alert
-LiDAR + 3× ultrasonic + IMU            40 features            7 classes      4 motors
+3× ultrasonic + IMU              36 features (9ch × 4)     7 classes     L/R motors
 ```
+
+> The LiDAR is still read and streamed (and drives obstacle haptics), but it was
+> dropped from the **classifier** model — see [`train_model.py`](train_model.py).
+> The PCB designs for **four** haptic motors; the current build drives **two**
+> (left/right) — see [`hardware/HARDWARE.md`](hardware/HARDWARE.md).
 
 ---
 
@@ -26,7 +32,7 @@ LiDAR + 3× ultrasonic + IMU            40 features            7 classes      4 
 | `train_model.py` | Train the Random Forest, export `model.pkl` + `classifier.h` |
 | `e2e_eval.py` | End-to-end pipeline + cross-condition evaluation, writes `results/` |
 | `data/` | Labeled recordings (one CSV per session) |
-| `hardware/` | **Design files** — pinout, BOM, schematic/PCB exports |
+| `hardware/` | **Design files** — pinout, BOM, block diagram + Fusion 360 CAD links |
 | `results/` | Evaluation report, confusion matrices, accuracy charts |
 | `model.pkl` | Trained model bundle (used by dashboard + eval) |
 

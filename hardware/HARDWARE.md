@@ -65,6 +65,12 @@ I²C bus clock: **100 kHz** (`Wire.setClock(100000)`).
 DRV2605 ROM effects used: strong buzz (14), gentle click (17), strong click (1),
 long buzz (47), library 1 (ERM), internal-trigger mode.
 
+> **Current build = 2 motors.** The PCB designs for all four channels above, but
+> only ch0/ch1 are populated and working. The firmware remaps them to the handle
+> sides (`HAPTIC_MOTORS 2` in `src/main.cpp`: ch1 → LEFT, ch0 → RIGHT). There is
+> no dedicated front motor in this build — a front obstacle buzzes LEFT+RIGHT
+> together. Set `HAPTIC_MOTORS` back to 3/4 once the other motors are restored.
+
 ---
 
 ## Bill of materials

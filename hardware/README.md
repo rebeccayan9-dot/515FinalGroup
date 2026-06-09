@@ -6,23 +6,21 @@ This folder holds the hardware design deliverables.
 - **[`HARDWARE.md`](HARDWARE.md)** — pinout, I²C address map, haptic channel map,
   BOM, and tunable thresholds (kept in sync with `src/main.cpp`).
 
-## ⚠️ Add the binary design-tool exports here
+## CAD / mechanical design files (Autodesk Fusion 360)
 
-The text reference above is committed, but the **native CAD/PCB design files must
-be added by the team** (they can't be derived from firmware). Drop the following
-into this folder and commit them:
+The 3D enclosure and mechanical design live in Autodesk Fusion 360 (cloud). Open
+in a browser — no Fusion install required (use the "View in browser" option):
 
-| File type | Example | Tool |
+| # | Design | Link |
 |---|---|---|
-| Schematic source | `safestep.kicad_sch` / `.sch` | KiCad / Eagle |
-| PCB layout source | `safestep.kicad_pcb` / `.brd` | KiCad / Eagle |
-| Schematic PDF | `schematic.pdf` | (export — easy to review on GitHub) |
-| Fabrication outputs | `gerbers.zip` | for board fab |
-| Enclosure / mechanical | `cane_mount.step` / `.f3d` / `.stl` | Fusion 360 / etc. |
-| Wiring diagram | `wiring.png` / `.svg` | Fritzing / hand-drawn |
+| 1 | Fusion 360 model 1 | https://a360.co/4g8JzPA |
+| 2 | Fusion 360 model 2 | https://a360.co/4e2haIc |
+| 3 | Fusion 360 model 3 | https://a360.co/3SsdAjs |
+| 4 | Fusion 360 model 4 | https://a360.co/4vB2Hu0 |
 
-> Tip: also export a **schematic PDF or PNG** — GitHub renders those inline, so
-> reviewers (and graders) can see the design without opening a CAD tool.
+> **Team TODO:** caption each link with what it actually is (e.g. cane mount,
+> sensor housing, battery enclosure, full assembly) and reorder if needed.
 
-If a design lives only in a cloud tool (e.g. Fusion 360, EasyEDA), add a link
-here **and** commit a PDF/PNG snapshot so the repo is self-contained.
+> **Self-containment tip:** Autodesk 360 links can expire or require sign-in. For
+> a graded, self-contained repo, also export each model to **STEP/STL** and a
+> **PNG/PDF screenshot** and commit them here — GitHub renders the images inline.

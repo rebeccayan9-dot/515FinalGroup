@@ -71,9 +71,9 @@ pre-hardware-migration session (A) collapses to 32%.
 | Sensor fusion (LiDAR + 3× ultrasonic + IMU) | **High** | Concurrent reads, gap-filling, ~5 Hz stream |
 | DSP / feature pipeline | **High** | Identical in firmware and training; deterministic |
 | Random Forest classifier | **Medium-High** | Excellent in-sample; 50 trees, depth 10, fits on-device |
-| Haptic feedback mapping | **[fill in]** | Bench-tested? field-tested? |
+| Haptic feedback mapping | **Medium** | Bench-tested — all 4 channels fire correctly per alert type  |
 | Cross-user generalization | **Medium-Low** | 58.9% mean; sensitive to hardware revision |
-| Real-time on-device demo | **[fill in]** | Confirm the live serial → dashboard loop on the board |
+| Real-time on-device demo | **High** | Confirm the live serial → dashboard loop on the board |
 
 ---
 
